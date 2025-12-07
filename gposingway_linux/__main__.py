@@ -4,22 +4,30 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from uuid import uuid4
 
 import vdf
-from xdg_base_dirs import xdg_data_home
 
-FFXIV_STEAM_APP_ID = 39210
-WORKDIR:Path = xdg_data_home() / 'gposingway_linux'
+from gposingway_linux.constants import *
+from gposingway_linux.installers import install_gpway, install_reshade
+from gposingway_linux.symlink_mgr import refresh_symlink_farm, PRESETS_SYMLINK_FARM, SHADERS_SYMLINK_FARM
 
-FFXIV_PATH_ENV = 'FFXIV_PATH'
-WINE_PREFIX_ENV = 'WINE_PREFIX'
+
 
 class EnvInfo:
     def __init__(self):
         self.method = 'Environment'
-        self.ffxiv_path = Path(os.getenv(FFXIV_PATH_ENV))
-        self.wine_prefix = Path(os.getenv(WINE_PREFIX_ENV))
-        self.valid = self.ffxiv_path != Path() and self.wine_prefix != Path()
+        self.ffxiv_path_raw = os.getenv(FFXIV_PATH_ENV, None)
+        self.wine_prefix_raw = os.getenv(WINE_PREFIX_ENV, None)
+        self.valid = self.ffxiv_path_raw is not None and self.wine_prefix_raw is not None
+
+    @property
+    def ffxiv_path(self) -> Path:
+        return Path(self.ffxiv_path_raw)
+
+    @property
+    def wine_prefix(self) -> Path:
+        return Path(self.wine_prefix_raw)
 
 
 class XLCoreInfo:
@@ -92,8 +100,7 @@ def main():
         exit(-1)
 
     # Initialize our workspace
-    WORKDIR.mkdir(exist_ok=True)
-    print(f"Using {str(WORKDIR)} as our working directory.")
+    ensure_dirs()
 
     # Gather information
     infoset = [EnvInfo(), XLCoreInfo(), SteamInfo()]
@@ -103,92 +110,52 @@ def main():
     print(f"\tGame location:\t{info.ffxiv_path}")
     print(f"\tWine prefix:\t{info.wine_prefix}")
 
-    # Install ReShade using https://github.com/kevinlekiller/reshade-steam-proton
+    ffxiv_path = info.ffxiv_path / 'game'
 
-    RESHADE_INSTALLER_DIR = WORKDIR / 'reshade-installer'
-    RESHADE_INSTALLER_DIR.mkdir(exist_ok=True)
-    RESHADE_DATA_DIR = WORKDIR / 'reshade'
+    uuid = uuid4()
+    reshade_ini: Path = ffxiv_path / FFXIV_RESHADE_INI
+    reshade_ini_bak: Path = ffxiv_path / (FFXIV_RESHADE_INI + f'.bak.{uuid}')
+    reshade_presets_ini: Path = ffxiv_path / FFXIV_RESHADE_PRESETS_INI
+    reshade_presets_ini_bak: Path = ffxiv_path / (FFXIV_RESHADE_PRESETS_INI + f'.bak.{uuid}')
 
-    reshade_install_env = {
-        'MAIN_PATH': str(RESHADE_DATA_DIR),
-        'SHADER_REPOS': '',
-        'RESHADE_ADDON_SUPPORT': '1'
-    }
+    if reshade_ini.exists():
+        shutil.copy(reshade_ini, reshade_ini_bak)
 
-    for k in os.environ:
-        reshade_install_env[k] = os.environ[k]
+    if reshade_presets_ini.exists():
+        shutil.copy(reshade_presets_ini, reshade_presets_ini_bak)
 
-    if not (RESHADE_INSTALLER_DIR / '.git').exists():
-        print("Downloading ReShade installer...")
-        subprocess.run(['git', 'clone', 'https://github.com/kevinlekiller/reshade-steam-proton.git', RESHADE_INSTALLER_DIR],
-            capture_output=True,
-            check=True)
-        print("ReShade installer downloaded.")
+    install_reshade(ffxiv_path, wine_prefix=info.wine_prefix)
+    install_gpway()
+
+
+    # Symlink farm nonsense now.
+    refresh_symlink_farm()
+    if not (ffxiv_path / FFXIV_PRESETS_DIR).exists():
+        p_dir: Path = (ffxiv_path / FFXIV_PRESETS_DIR)
+        print(f"Linking {p_dir} to {PRESETS_SYMLINK_FARM}")
+        p_dir.symlink_to(PRESETS_SYMLINK_FARM)
+
+    if not (ffxiv_path / FFXIV_SHADERS_DIR).exists():
+        p_dir: Path = (ffxiv_path / FFXIV_SHADERS_DIR)
+        print(f"Linking {p_dir} to {SHADERS_SYMLINK_FARM}")
+        p_dir.symlink_to(SHADERS_SYMLINK_FARM)
+
+    # Restore or bootstrap configs
+    if reshade_ini_bak.exists():
+        shutil.copy(reshade_ini_bak, reshade_ini)
+        reshade_ini_bak.unlink()
+        print("Restored existing ReShade.ini")
     else:
-        print("Getting updates for the ReShade installer...")
-        subprocess.run(
-            ['git', 'pull', '--rebase'],
-            capture_output=True,
-            check=True,
-            cwd=RESHADE_INSTALLER_DIR
-        )
-        print("ReShade installer updated.")
+        shutil.copy(GPOSINGWAY_DIR / FFXIV_RESHADE_INI, reshade_ini)
+        print("Bootstrapped with GPosingway default ReShade.ini")
 
-    reshade_install_stdin = "\n".join(['i', str(info.ffxiv_path), 'y', 'n', '64', 'dxgi', 'y', ''])
-
-    print(f"Installing ReShade for FFXIV at {info.ffxiv_path}...")
-    subprocess.run(
-        ['./reshade-linux.sh'],
-        input=reshade_install_stdin,
-        text=True,
-        env=reshade_install_env,
-        cwd=RESHADE_INSTALLER_DIR,
-        capture_output=True
-    )
-
-    # reshade-linux.sh will tell the user to set WINEDLLOVERRIDES="d3dcompiler_47=n;dxgi=n,b"
-
-    # Fix d3dcompiler_47.dll in Wine/Proton path
-
-    sys32 = info.wine_prefix / 'drive_c' / 'windows' / 'system32'
-
-    target_d3d:Path = sys32/'d3dcompiler_47.dll'
-    if target_d3d.exists():
-        print("Backing up current d3dcompiler_47.dll to d3dcompiler_47._dll. If a backup already exists here, it will be destroyed.")
-        target_d3d.rename(sys32 / 'd3dcompiler_47._dll')
-
-    print("Copying d3dcompiler_47.dll into your Wine/Proton environment")
-    shutil.copy(info.ffxiv_path / 'd3dcompiler_47.dll', target_d3d)
-
-    # Remove baseline shaders / ReShade config
-
-    print("Cleaning out baseline shaders and configuration (you didn't want these).")
-    (info.ffxiv_path / 'ReShade.ini').unlink()
-    (info.ffxiv_path / 'ReShade_shaders').unlink()
-
-    # Pull
-
-    GPOSINGWAY_DIR = WORKDIR / 'gposingway'
-    if not (GPOSINGWAY_DIR / '.git').exists():
-        print("Downloading GPosingway...")
-        subprocess.run(['git', 'clone', 'https://github.com/gposingway/gposingway.git', GPOSINGWAY_DIR],
-            capture_output=True,
-            check=True)
-        print("GPosingway downloaded.")
+    if reshade_presets_ini_bak.exists():
+        shutil.copy(reshade_presets_ini_bak, reshade_presets_ini)
+        reshade_presets_ini_bak.unlink()
+        print("Restored existing ReShadePresets.ini")
     else:
-        print("Getting updates for the ReShade installer...")
-        subprocess.run(
-            ['git', 'pull', '--rebase'],
-            capture_output=True,
-            check=True,
-            cwd=GPOSINGWAY_DIR
-        )
-        print("GPosingway updated.")
-
-    for f in ['reshade-presets', 'reshade-shaders']:
-        (info.ffxiv_path / f).symlink_to(GPOSINGWAY_DIR / f)
-    for f in ['ReShade.ini', 'ReShadePreset.ini']:
-        shutil.copy(GPOSINGWAY_DIR / f, info.ffxiv_path / f)
+        shutil.copy(GPOSINGWAY_DIR / FFXIV_RESHADE_PRESETS_INI, reshade_presets_ini)
+        print("Bootstrapped with GPosingway default ReShadePreset.ini")
 
     print("All done!")
 
