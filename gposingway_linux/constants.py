@@ -23,6 +23,9 @@ FFXIV_SHADERS_DIR ='reshade-shaders'
 FFXIV_RESHADE_INI = 'ReShade.ini'
 FFXIV_RESHADE_PRESETS_INI = 'ReShadePreset.ini'
 
+D3D_COMPILER_DLL = 'd3dcompiler_47.dll'
+D3D_COMPILER_BACKUP = 'd3dcompiler_47.dll.gposingway-backup'
+
 
 def ensure_dirs():
     WORKDIR.mkdir(exist_ok=True)

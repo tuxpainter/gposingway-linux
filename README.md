@@ -34,12 +34,19 @@ above, but this was mostly created as a lark in an afternoon, so
 run-of-the-mill support will likely be up to you as well.
 
 ## How To Run
-You must have Poetry installed locally for this to execute - adding a
-build/bootstrap script is on the to-do list.
+You must have [uv](https://docs.astral.sh/uv/) installed locally for this to
+execute - adding a build/bootstrap script is on the to-do list.
 
 ```sh
-poetry run python gposingway_linux
+# Dry run (default) - shows what would be done without changing anything
+uv run python gposingway_linux
+
+# Install ReShade and GPosingway
+uv run python gposingway_linux install
+
+# Uninstall ReShade and GPosingway
+uv run python gposingway_linux uninstall
 ```
 
 If `gposingway-linux` does not detect your FFXIV install, set the environment
-variables menteioned above.
+variables mentioned above.

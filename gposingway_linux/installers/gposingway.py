@@ -6,12 +6,12 @@ def install():
     "Installs or updates GPosingway in our workdir."
     if not (GPOSINGWAY_DIR / '.git').exists():
         print("Downloading GPosingway...")
-        subprocess.run(['git', 'clone', 'https://github.com/gposingway/gposingway.git', GPOSINGWAY_DIR],
+        subprocess.run(['git', 'clone', '--depth', '1', 'https://github.com/gposingway/gposingway.git', GPOSINGWAY_DIR],
             capture_output=True,
             check=True)
         print("GPosingway downloaded.")
     else:
-        print("Getting updates for the ReShade installer...")
+        print("Getting updates for GPosingway...")
         subprocess.run(
             ['git', 'pull', '--rebase'],
             capture_output=True,

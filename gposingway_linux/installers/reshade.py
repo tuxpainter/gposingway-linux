@@ -3,7 +3,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-from gposingway_linux.constants import WORKDIR
+from gposingway_linux.constants import WORKDIR, D3D_COMPILER_DLL, D3D_COMPILER_BACKUP
 
 def install(ffxiv_path: Path, wine_prefix: Path):
     "Install ReShade using https://github.com/kevinlekiller/reshade-steam-proton"
@@ -25,7 +25,7 @@ def install(ffxiv_path: Path, wine_prefix: Path):
 
     if not (RESHADE_INSTALLER_DIR / '.git').exists():
         print("Downloading ReShade installer...")
-        subprocess.run(['git', 'clone', 'https://github.com/kevinlekiller/reshade-steam-proton.git', RESHADE_INSTALLER_DIR],
+        subprocess.run(['git', 'clone', '--depth', '1', 'https://github.com/kevinlekiller/reshade-steam-proton.git', RESHADE_INSTALLER_DIR],
             capture_output=True,
             check=True)
         print("ReShade installer downloaded.")
@@ -58,13 +58,14 @@ def install(ffxiv_path: Path, wine_prefix: Path):
 
     sys32 = wine_prefix / 'drive_c' / 'windows' / 'system32'
 
-    target_d3d:Path = sys32/'d3dcompiler_47.dll'
-    if target_d3d.exists():
-        print("Backing up current d3dcompiler_47.dll to d3dcompiler_47._dll. If a backup already exists here, it will be destroyed.")
-        target_d3d.rename(sys32 / 'd3dcompiler_47._dll')
+    target_d3d: Path = sys32 / D3D_COMPILER_DLL
+    backup_d3d: Path = sys32 / D3D_COMPILER_BACKUP
+    if target_d3d.exists() and not backup_d3d.exists():
+        print(f"Backing up {D3D_COMPILER_DLL} to {D3D_COMPILER_BACKUP}")
+        shutil.copy(target_d3d, backup_d3d)
 
-    print("Copying d3dcompiler_47.dll from Reshade into your Wine/Proton environment")
-    shutil.copy(ffxiv_path / 'd3dcompiler_47.dll', target_d3d)
+    print("Copying d3dcompiler_47.dll from ReShade into your Wine/Proton environment")
+    shutil.copy(ffxiv_path / D3D_COMPILER_DLL, target_d3d)
 
     (ffxiv_path / 'ReShade.ini').unlink()
     (ffxiv_path / 'ReShade_shaders').unlink()
